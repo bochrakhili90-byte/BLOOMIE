@@ -159,18 +159,36 @@ def get_scenarios(request):
 
     return Response(data)
 
-
 @api_view(["POST"])
 def save_reflection(request):
-    text = request.data.get("text")
+    text = request.data.get("text", "")
+    scenario_id = request.data.get("scenario_id")
+    choice_id = request.data.get("choice_id")
+
+    user = request.user if request.user.is_authenticated else User.objects.first()
+    scenario = Scenario.objects.get(id=scenario_id) if scenario_id else Scenario.objects.first()
+    choice = Choice.objects.get(id=choice_id) if choice_id else Choice.objects.filter(scenario=scenario).first()
+
+    emotion, feedback = analyze_reflection(text)
 
     reflection = Reflection.objects.create(
+        user=user,
+        scenario=scenario,
+        choice=choice,
         text=text
     )
 
+    EmotionResult.objects.create(
+        reflection=reflection,
+        emotion_label=emotion,
+        feedback_message=feedback
+    )
+
     return Response({
-        "message": "Reflection saved!",
-        "id": reflection.id
+        "message": "Reflection saved and analyzed!",
+        "id": reflection.id,
+        "emotion": emotion,
+        "feedback": feedback
     })
 @api_view(["POST"])
 def aura_analyze(request):
@@ -196,12 +214,28 @@ def parent_dashboard(request):
     total_scenarios = Scenario.objects.count()
     total_emotions = EmotionResult.objects.count()
 
+    if total_reflections >= 5:
+        progress_level = "Growing Star"
+        badge = "Reflection Hero"
+    elif total_reflections >= 3:
+        progress_level = "Kindness Sprout"
+        badge = "Empathy Builder"
+    elif total_reflections >= 1:
+        progress_level = "First Bloom"
+        badge = "First Reflection"
+    else:
+        progress_level = "New Seed"
+        badge = "No badge yet"
+
     recent_reflections = Reflection.objects.all().order_by("-submitted_at")[:5]
+    recent_emotions = EmotionResult.objects.all().order_by("-detected_at")[:5]
 
     return Response({
         "total_reflections": total_reflections,
         "total_scenarios": total_scenarios,
         "total_emotions_detected": total_emotions,
+        "progress_level": progress_level,
+        "earned_badge": badge,
         "recent_reflections": [
             {
                 "id": reflection.id,
@@ -209,6 +243,14 @@ def parent_dashboard(request):
                 "submitted_at": reflection.submitted_at
             }
             for reflection in recent_reflections
+        ],
+        "recent_emotions": [
+            {
+                "emotion": emotion.emotion_label,
+                "feedback": emotion.feedback_message,
+                "detected_at": emotion.detected_at
+            }
+            for emotion in recent_emotions
         ]
     })
     
